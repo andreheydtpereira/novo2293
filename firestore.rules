@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return signedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid))
+        : null;
+    }
+
+    function role() {
+      return signedIn() && userDoc() != null && userDoc().data != null
+        ? userDoc().data.role
+        : null;
+    }
+
+    function userSetorId() {
+      return signedIn() && userDoc() != null && userDoc().data != null
+        ? userDoc().data.setorPrincipalId
+        : null;
+    }
+
+    function userAreaId() {
+      return signedIn() && userDoc() != null && userDoc().data != null
+        ? userDoc().data.areaPrincipalId
+        : null;
+    }
+
+    function isGestor() {
+      return signedIn() &&
+        (role() == 'gestor_area' || role() == 'gestor_global' || role() == 'admin' || role() == 'default');
+    }
+
+    function isManutentor() {
+      return signedIn() && role() == 'manutentor';
+    }
+
+    function sameScope(resourceData) {
+      return resourceData.setorId == userSetorId() && resourceData.areaId == userAreaId();
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update: if request.auth.uid == uid || isGestor();
+      allow delete: if isGestor();
+    }
+
+    match /setores/{id} {
+      allow read: if signedIn();
+      allow write: if isGestor();
+    }
+
+    match /areas/{id} {
+      allow read: if signedIn();
+      allow write: if isGestor();
+    }
+
+    match /maquinas/{id} {
+      allow read: if signedIn();
+      allow write: if isGestor();
+    }
+
+    match /materiais/{id} {
+      allow read: if signedIn();
+      allow write: if isGestor();
+    }
+
+    match /materials/{id} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Pendências abertas por qualquer usuário; manutentor só vê as do escopo dele e não edita
+    match /tasks/{id} {
+      allow read: if isGestor() || (signedIn() && sameScope(resource.data));
+      allow create: if isGestor()
+        || (isManutentor()
+            && request.resource.data.setorId == userSetorId()
+            && request.resource.data.areaId == userAreaId());
+      allow update: if isGestor();
+      allow delete: if isGestor();
+    }
+
+    // Programação semanal: manutentor lê apenas a do próprio setor/área
+    match /week_plans/{id} {
+      allow read: if isGestor() || (signedIn() && sameScope(resource.data));
+      allow create, update, delete: if isGestor();
+    }
+
+    match /history/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn();
+      allow delete: if isGestor();
+    }
+
+    match /config/{id} {
+      allow read: if signedIn();
+      allow write: if isGestor();
+    }
+
+    match /pendencias/{id} {
+      allow read: if isGestor() || (signedIn() && sameScope(resource.data));
+      allow create: if signedIn();
+      allow update, delete: if isGestor();
+    }
+
+    match /{document=**} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+  }
+}
